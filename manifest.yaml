@@ -54,7 +54,7 @@ app:
   #
   # Hyphens are not valid in an app id anywhere. `git remote get-url origin`
   # tells you the repository name.
-  id: hack.your_app_name_here
+  id: hack.e2e_sec_193c
   name: Days Until
   # The version you are pushing. Pippa keeps a copy of the code of every
   # version, so pushing a new version never changes an older one: the approved
