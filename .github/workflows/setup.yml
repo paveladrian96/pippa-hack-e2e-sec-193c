@@ -1,0 +1,75 @@
+name: Set up the app
+
+# Fills in `app.id` in manifest.yaml from the repository's name, once, in a new
+# builder repository, and commits it as github-actions[bot]:
+#
+#     Pippa-Labs/pippa-hack-tide-times  ->  id: hack.tide_times
+#
+# The id is not a choice: Pippa publishes a repository's app under that one id
+# and refuses any other. So nobody has to work it out, and the builder's first
+# push already has the right one. Every later push finds the id set and does
+# nothing. A commit made with this workflow's token starts no other workflow,
+# so it never publishes anything by itself.
+#
+# Never in the templates themselves: their id stays the placeholder, which is
+# what every new repository starts with.
+#
+# Managed by Pippa Labs, like the rest of .github/. Do not edit.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: setup-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  app-id:
+    name: Set app.id
+    if: >-
+      startsWith(github.repository, 'Pippa-Labs/pippa-hack-')
+      && github.repository != 'Pippa-Labs/pippa-hack-template'
+      && github.repository != 'Pippa-Labs/pippa-hack-template-public'
+      && !github.event.repository.is_template
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+
+      - name: Set app.id from the repository name
+        shell: bash
+        run: |
+          set -euo pipefail
+          placeholder='^[[:space:]]*id:[[:space:]]*hack\.your_app_name_here[[:space:]]*$'
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Three tries: the builder may push while this runs, and then main has
+          # moved on under it. Each try starts again from the newest main.
+          for attempt in 1 2 3; do
+            if ! grep -qE "$placeholder" manifest.yaml 2>/dev/null; then
+              echo "app.id is already set; nothing to do."
+              exit 0
+            fi
+            python3 scripts/set_app_id.py "$GITHUB_REPOSITORY" manifest.yaml
+            if git diff --quiet -- manifest.yaml; then
+              exit 0
+            fi
+            git add manifest.yaml
+            git commit -q -m "Set app.id from the repository name"
+            if git push -q origin HEAD:main; then
+              echo "Committed app.id to main."
+              exit 0
+            fi
+            echo "main moved while this ran (attempt ${attempt}); starting again from the new main."
+            git fetch -q origin main
+            git reset -q --hard origin/main
+          done
+          echo "::error::Could not commit app.id to main after 3 attempts. Set it by hand: CLAUDE.md, step 1."
+          exit 1

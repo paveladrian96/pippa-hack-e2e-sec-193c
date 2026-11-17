@@ -1,0 +1,173 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Your app's manifest. This file IS the app's contract.
+#
+# Everything Pippa shows a user about your app is generated from this file, and
+# the runtime refuses anything you did not declare here. If `outcomes` does not
+# list it, your app cannot be asked to do it. If `output` does not name a
+# field, returning that field is an error, not a bonus.
+#
+# That strictness is the point. A user installing your app sees a permission
+# screen built from this file, so the file has to be the truth.
+#
+# Replace everything below with your own app. The example describes a small
+# "days until" app so you can see the shape of each part.
+# ─────────────────────────────────────────────────────────────────────────────
+
+manifest_version: 1
+
+# Your app keeps nothing between calls. This is not a preference you can
+# change — every hackathon app runs with `persistence: none`, and the runtime
+# throws away the machine your code ran on when it finishes.
+persistence: none
+
+# ── Your public author name ──────────────────────────────────────────────────
+#
+# EMPTY ON PURPOSE. Claude asks you for it before anything else, and nothing
+# publishes until it is filled in (the build says "Nothing to publish yet").
+#
+# It is the name everybody sees next to your app: "by <name>" on the install
+# screen, in the list of apps and on every answer your app gives. So it is
+# PUBLIC, and it should be a pseudonym: a made-up name or a nickname, never
+# your real name and never an email address. This repository is public too,
+# so anyone can read it here as well.
+#
+# The rules: 3 to 30 characters; letters, numbers, spaces, dots, hyphens and
+# underscores; starting with a letter or a number; nothing that looks like an
+# email or a web address; and not "pippa", "official" or "verified". Another
+# builder cannot use the same name, and you can use yours on all your apps.
+#
+# It does not decide who owns the app, and nothing in this file does. Pippa
+# Labs created this repository for your Pippa account, so every app published
+# from it is yours. docs/REVIEW_AND_SHARING.md is the whole story.
+app_author_name: ""
+
+app:
+  # Filled in for you. A new repository replaces this placeholder within a
+  # minute of being created, from the repository's name, and commits it as
+  # github-actions[bot] (.github/workflows/setup.yml). Until then the build
+  # publishes nothing.
+  #
+  # It must be `hack.` + this repository's name with `pippa-hack-` removed and
+  # every hyphen turned into an underscore:
+  #
+  #     Pippa-Labs/pippa-hack-tide-times  ->  hack.tide_times
+  #
+  # Hyphens are not valid in an app id anywhere. `git remote get-url origin`
+  # tells you the repository name.
+  id: hack.your_app_name_here
+  name: Days Until
+  # The version you are pushing. Pippa keeps a copy of the code of every
+  # version, so pushing a new version never changes an older one: the approved
+  # version keeps working for everyone while you try the next.
+  #
+  # Until you submit a version for review you can push it again under the
+  # same number, as often as you like, and it is replaced. From the moment
+  # you press Submit for review it is frozen, so change this number before
+  # your next push (0.1.0 -> 0.1.1), or the push is refused.
+  #
+  # Three numbers: 0.1.0, not 0.1 and not v0.1.0. Pippa never compares them:
+  # your "latest" version is simply the one you pushed most recently.
+  # docs/REVIEW_AND_SHARING.md says which version you, your testers and
+  # everybody else get.
+  version: 0.1.0
+  # One or two sentences, written for someone deciding whether to install it.
+  # Say what it does and what it sends anywhere. Never use the word "by" — the
+  # badge Pippa shows is parsed from "[via <name> <version> by <author name>]"
+  # (the author name is `app_author_name` above) and splits on the first "by".
+  summary: >-
+    Works out how many days there are until a date you name, and says which
+    day of the week it falls on.
+
+# Who can install it. `personal` means a person's own Pippa.
+agent_types:
+  - personal
+
+# ── Outcomes: the things your app can be asked to do ─────────────────────────
+#
+# An outcome is one job. Pippa picks between your outcomes — and between your
+# app and every other app — by comparing the user's message against `summary`
+# and `example_phrases`. So those two fields are not documentation; they are
+# the behaviour that decides whether your app is used at all.
+#
+# Writing example phrases well:
+#   * Write how a PERSON would ask, not how you would name a function.
+#   * Use carrier words ("how long until"), not one specific subject —
+#     the subject changes every time and only dilutes the match.
+#   * Give each outcome its own words. Two outcomes sharing vocabulary tie,
+#     and a tie is resolved by a model guessing.
+#   * Avoid words another app owns. "today", "tomorrow", "this week" and
+#     "my calendar" belong to Pippa Diary; a phrase using them will lose.
+
+outcomes:
+  - id: days.until
+    summary: Count the days between now and a date, and name the weekday
+    example_phrases:
+      - how many days until
+      - how long until
+      - how many sleeps until
+      - days left until
+      - what day of the week is
+    # What Pippa extracts from the user's message and hands you. A model reads
+    # `description` to do that extraction, so write it as an instruction to
+    # whoever is filling the field in.
+    inputs:
+      # `required: false`, although the app is useless without a date, and
+      # that is deliberate. A missing REQUIRED input is refused inside the
+      # runtime before your code runs, and the user is shown a message that
+      # blames your app for a question they asked perfectly reasonably. An
+      # optional input simply arrives absent, your code notices, and you
+      # raise an error that says something true. Keep `required: true` for
+      # inputs the extractor can always supply.
+      - name: date
+        type: string
+        required: false
+        description: >-
+          The target date, as the user wrote it — for example "25 December",
+          "2027-01-01" or "next Friday". If the message does not name a date,
+          return an empty string rather than guessing.
+      - name: timezone
+        type: timezone
+        required: false
+        description: The user's time zone, so "today" means their today.
+    # What you promise to return. Returning anything else is refused; omitting
+    # a declared field is refused too. Keep it small and specific.
+    output:
+      - name: days
+        type: integer
+        description: How many whole days until the date. Negative if it has passed.
+      - name: target_date
+        type: string
+        description: The date you actually used, as YYYY-MM-DD.
+      - name: weekday
+        type: string
+        description: The day of the week the date falls on.
+      - name: already_passed
+        type: boolean
+
+# ── API keys your app needs (this example needs none) ────────────────────────
+#
+# If your app calls an API that needs a key, declare the key here by NAME,
+# and never write the key itself in any file:
+#
+#   app_secrets:
+#     - name: OPENWEATHER_API_KEY        # capitals, digits, underscores
+#       description: "OpenWeather key, used to look up the forecast"
+#       required: true                   # the app cannot answer without it
+#
+# Your code reads it inside handle() with os.environ["OPENWEATHER_API_KEY"].
+# You set the value in Pippa: Apps > Created by me > your app > Keys, and can
+# change it there any time without a push. On your computer it comes from a
+# file called .env, which git never commits. docs/API_APPS.md, "Using API
+# keys", has the rules and an example.
+#
+# ── Things this example does NOT use ─────────────────────────────────────────
+#
+# `connectors:` and `secrets:` declare that your app needs somebody's
+# credentials — a Google account, for instance. Hackathon apps may not use
+# them: registration refuses any app that asks, because granting a stranger's
+# app a real user's credential is not something a workshop can consent to on
+# a user's behalf. Your app's OWN keys are `app_secrets`, above.
+#
+# Your app CAN call the public internet (see docs/HOW_PIPPA_APPS_WORK.md).
+# This repository is public, so a key in any file here is a key anyone can
+# copy: keys only ever go in Pippa and in .env.

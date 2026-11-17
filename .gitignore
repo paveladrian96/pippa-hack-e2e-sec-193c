@@ -1,0 +1,41 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+.DS_Store
+.env
+vendor/
+*.whl
+
+# This repository is public: anything committed can be read by anyone, and it
+# stays in the git history after it is deleted. Keep keys and local files out.
+# Your app's keys live in Pippa (Apps > Created by me > your app > Keys); a
+# local copy goes in `.env`. `.env.example` lists the names with no values,
+# and is the one that is committed.
+.env.*
+!.env.example
+*.env
+# Copies of .env under other names: an editor's backup (.env~), what Windows
+# names a copied file (.env - Copy), .env-prod, .env_local, direnv's .envrc.
+.env~
+.env *
+.env-*
+.env_*
+.envrc
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+credentials*.json
+secrets.json
+.netrc
+.pypirc
+.claude/settings.local.json
+env/
+.idea/
+.vscode/
+*.log

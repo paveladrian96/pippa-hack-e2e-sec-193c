@@ -1,0 +1,16 @@
+name: Publish to Pippa
+
+# Only a push to main publishes. Pull requests, forks and manual runs never
+# do: Pippa checks that the run was a push, and refuses anything else.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  id-token: write
+  statuses: write
+
+jobs:
+  publish:
+    uses: Pippa-Labs/pippa-builders-pipeline/.github/workflows/reusable-hack-publish.yml@main

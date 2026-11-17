@@ -1,0 +1,282 @@
+#!/bin/sh
+# Stops a commit that would make an email address or a real name public, or
+# that would commit an API key, a token or a password.
+#
+# Everything committed here can end up public: the files, and the name and
+# email address on the commit itself, which stay in the history for good. So
+# this refuses a commit when
+#
+#   * its author or committer address is not a GitHub no-reply address
+#     (<id>+<login>@users.noreply.github.com, or GitHub's own `noreply`
+#     address at github.com, which it puts on the edits made on its
+#     website), or
+#   * its author or committer name is not the pseudonym in `app_author_name`
+#     in manifest.yaml, or, while that is still empty, no name is set for this
+#     repository at all, so that git would use this computer's own, or
+#   * a file it adds or changes contains an email address. Addresses at the
+#     domains reserved for examples (example.com, example.org, example.net,
+#     anything ending .example, .test, .invalid or .localhost) and no-reply
+#     addresses are fine: they cannot belong to anybody. Neither is a file
+#     name that only looks like one, such as a picture's logo@2x.png, or
+#   * a file it adds or changes looks as if it holds a key: scripts/
+#     check_secrets.py decides, on the staged files. Without Python it falls
+#     back to the provider key formats below (secret_re), and a file named
+#     like .env or *.pem. A line ending `# pragma: allowlist secret` may keep
+#     a test value that only looks like a key, but never a key in a
+#     provider's own format or a private key: those are always reported.
+#
+# The build checks the addresses and the keys too, but by then they have been
+# pushed, and a pushed key has to be rotated.
+#
+# Git never runs a hook that arrives with a clone. Claude switches this one on
+# in each copy of the repository (CLAUDE.md, step 1):
+#
+#     git config core.hooksPath .githooks
+#
+# POSIX sh and git only, so it runs wherever git does, Git for Windows
+# included; Python only for the key check, and only if it is installed. The
+# four email patterns below are the ones in scripts/check.py, and secret_re is
+# HOOK_PATTERN in scripts/check_secrets.py, character for character;
+# scripts/test_pre_commit.py and scripts/test_check_secrets.py check that they
+# stay so.
+
+email_re='[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}'
+allowed_re='@(users\.noreply\.github\.com|([A-Za-z0-9-]+\.)*example\.(com|org|net)|([A-Za-z0-9-]+\.)*(example|test|invalid|localhost))$'
+file_suffix_re='\.(avif|bmp|cjs|css|csv|gif|heic|htm|html|ico|jpeg|jpg|js|json|jsx|lock|map|mjs|png|scss|svg|tif|tiff|toml|ts|tsx|txt|webp|whl|xml|yaml|yml)$'
+noreply_re='^([^@]+@users\.noreply\.github\.com|noreply@github\.com)$'
+secret_re='((AKIA|ASIA)[0-9A-Z]{16})|(gh[pousr]_[A-Za-z0-9]{36})|(github_pat_[A-Za-z0-9_]{22,})|(xox[abprs]-[A-Za-z0-9-]{10,})|(sk-ant-[A-Za-z0-9_-]{20,})|(AIza[0-9A-Za-z_-]{35})|(SG\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,})|(hf_[A-Za-z0-9]{30,})|((sk|rk)_(live|test)_[A-Za-z0-9]{16,})|(-----BEGIN ([A-Z]+ )*PRIVATE KEY)'
+max_bytes=1048576
+nl='
+'
+
+# s***@domain: enough to recognise your own address, not enough to copy it.
+mask() {
+  printf '%s***@%s' "$(printf '%s' "${1%%@*}" | cut -c1)" "${1#*@}"
+}
+
+# Tabs as spaces, every run of spaces as one, and none at the ends: what
+# Pippa does to an author name, and git to the name on a commit.
+collapse() {
+  printf '%s\n' "$1" | tr '\t' ' ' | sed 's/  */ /g; s/^ //; s/ $//'
+}
+
+# Whether two names are the same name. Dots at the end do not count, because
+# some versions of git leave them off the name on a commit.
+same_name() {
+  [ "$(collapse "$1" | sed 's/[ .]*$//')" = "$(collapse "$2" | sed 's/[ .]*$//')" ]
+}
+
+# ── The pseudonym ────────────────────────────────────────────────────────────
+# `app_author_name` from the staged manifest.yaml, which is what the commit
+# will contain: the last top-level line, its value in quotes or bare, without
+# a comment. A value written any other way (on the next line, as a block, with
+# an escape in it) is not read, and counts as not set yet.
+pseudonym=$(git show :manifest.yaml 2>/dev/null | tr -d '\r' |
+  sed -n 's/^app_author_name[ 	]*:[ 	]*//p' | tail -n 1)
+case $pseudonym in
+  \"*) pseudonym=$(printf '%s\n' "$pseudonym" | sed -n 's/^"\([^"\\]*\)".*$/\1/p') ;;
+  \'*) pseudonym=$(printf '%s\n' "$pseudonym" | sed -n "s/^'\([^']*\)'.*\$/\1/p") ;;
+  *) pseudonym=$(printf '%s\n' "$pseudonym" | sed 's/^#.*$//; s/[ 	]#.*$//') ;;
+esac
+pseudonym=$(collapse "$pseudonym")
+case $pseudonym in
+  '~' | null | Null | NULL | '|'* | '>'*) pseudonym='' ;;
+esac
+
+# ── The name and address on the commit ──────────────────────────────────────
+identity=''
+names=''
+seen=''
+for role in AUTHOR COMMITTER; do
+  ident=$(git var "GIT_${role}_IDENT" 2>/dev/null)
+  who=$(printf '%s' "$role" | tr 'A-Z' 'a-z')
+  name=$(printf '%s\n' "$ident" | sed -n 's/^\(.*\) <[^>]*>.*$/\1/p')
+  if [ -n "$pseudonym" ] && [ -n "$ident" ] && ! same_name "$name" "$pseudonym"; then
+    names="${names}${names:+, }${who}"
+  fi
+  email=$(printf '%s\n' "$ident" | sed -n 's/^.*<\([^>]*\)>.*$/\1/p')
+  [ -n "$email" ] || continue
+  if printf '%s\n' "$email" | grep -qiE "$noreply_re"; then
+    continue
+  fi
+  [ "$email" = "$seen" ] && continue
+  seen=$email
+  identity="${identity}  ${who}: $(mask "$email")${nl}"
+done
+# Nothing to compare with yet: then at least not the name from this
+# computer's own git settings, which is usually the person's real one.
+no_local_name=''
+if [ -z "$pseudonym" ] && [ -z "$(git config --local user.name 2>/dev/null)" ]; then
+  no_local_name=yes
+fi
+
+# ── Email addresses in the files being committed ─────────────────────────────
+# The staged copy of each file, which is what the commit will contain, not the
+# one on disk. Binary files and files over a megabyte are skipped, as the
+# build skips them.
+files=''
+set -f
+IFS=$nl
+for path in $(git -c core.quotepath=off diff --cached --name-only --diff-filter=ACMR); do
+  size=$(git cat-file -s ":$path" 2>/dev/null) || continue
+  [ "$size" -le "$max_bytes" ] || continue
+  for hit in $(git show ":$path" 2>/dev/null | grep -nIoE "$email_re" |
+               grep -viE "$allowed_re" | grep -viE "$file_suffix_re"); do
+    files="${files}  ${path}:${hit%%:*}: $(mask "${hit#*:}")${nl}"
+  done
+done
+unset IFS
+set +f
+
+# ── Keys in the files being committed ───────────────────────────────────────
+# scripts/check_secrets.py --staged, with the first Python 3 that works.
+# PIPPA_HOOK_PYTHON names one (`none` for the fallback below), for a machine
+# where it is not on PATH. The script beside this hook first, so a hook
+# switched on from elsewhere still finds it; then the repository's own.
+secrets=''
+secrets_fallback=''
+script=''
+for candidate in "$(dirname "$0")/../scripts/check_secrets.py" \
+                 "$(git rev-parse --show-toplevel 2>/dev/null)/scripts/check_secrets.py"; do
+  if [ -f "$candidate" ]; then
+    script=$candidate
+    break
+  fi
+done
+python=''
+if [ -n "$script" ] && [ "${PIPPA_HOOK_PYTHON:-}" != none ]; then
+  for candidate in ${PIPPA_HOOK_PYTHON:+"$PIPPA_HOOK_PYTHON"} python3 python py; do
+    # `py` is the Windows launcher; the Windows Store's stand-in for a
+    # missing python fails this test, and is skipped.
+    if [ "$candidate" = py ]; then
+      py -3 -c 'import sys; sys.exit(sys.version_info < (3, 8))' >/dev/null 2>&1 &&
+        python='py -3' && break
+    elif "$candidate" -c 'import sys; sys.exit(sys.version_info < (3, 8))' >/dev/null 2>&1; then
+      python=$candidate
+      break
+    fi
+  done
+fi
+checked=''
+if [ -n "$python" ]; then
+  if [ "$python" = 'py -3' ]; then
+    out=$(py -3 "$script" --staged 2>&1)
+  else
+    out=$("$python" "$script" --staged 2>&1)
+  fi
+  case $? in
+    0) checked=yes ;;
+    1) checked=yes; secrets=$out ;;
+  esac
+fi
+# No Python, or the script could not run: the provider formats and the file
+# names, with grep. The allowlist comment does not count here, because it
+# never lets a provider's format through; matches that are placeholders
+# (XXXX, EXAMPLE) are dropped. The match itself is never printed.
+if [ -z "$checked" ]; then
+  set -f
+  IFS=$nl
+  for path in $(git -c core.quotepath=off diff --cached --name-only --diff-filter=ACMR); do
+    base=${path##*/}
+    case $base in
+      .env.example | *.pub) ;;
+      .env | .env.* | *.env | *.pem | *.key | *.p12 | *.pfx | id_rsa* | id_dsa* | id_ecdsa* | id_ed25519* | credentials*.json | secrets.json | .netrc | .pypirc | .npmrc)
+        secrets_fallback="${secrets_fallback}  ${path}: a file that holds keys by its nature${nl}"
+        continue ;;
+    esac
+    size=$(git cat-file -s ":$path" 2>/dev/null) || continue
+    [ "$size" -le "$max_bytes" ] || continue
+    for hit in $(git show ":$path" 2>/dev/null |
+                 grep -nIoE "$secret_re" | grep -viE '^[0-9]+:.*(XXXX|EXAMPLE)'); do
+      secrets_fallback="${secrets_fallback}  ${path}:${hit%%:*}: a provider's key format${nl}"
+    done
+  done
+  unset IFS
+  set +f
+fi
+
+[ -z "$identity$names$no_local_name$files$secrets$secrets_fallback" ] && exit 0
+
+{
+  if [ -n "$identity$names$no_local_name$files" ]; then
+    echo "Commit stopped: it would make an email address or a real name public."
+  fi
+  if [ -n "$names" ]; then
+    echo
+    echo "The name on the commit ($names) is not your public author name,"
+    echo "app_author_name in manifest.yaml (\"$pseudonym\")."
+    cat <<'EOF'
+
+  Every commit shows its name, to anybody who can read the repository, for
+  good. Use the pseudonym for this repository:
+
+EOF
+    echo "    git config user.name \"$pseudonym\""
+    cat <<'EOF'
+
+  The name is read from the staged manifest.yaml: if you have just changed
+  app_author_name, stage manifest.yaml too (git add manifest.yaml).
+EOF
+  fi
+  if [ -n "$no_local_name" ]; then
+    echo
+    echo "No name is set for this repository."
+    cat <<'EOF'
+
+  The commit would show the name from this computer's own git settings,
+  usually a real one, to anybody who can read the repository, for good. Set
+  the pseudonym for this repository: the app_author_name you choose for
+  manifest.yaml (CLAUDE.md, step 1).
+
+    git config user.name "<pseudonym>"
+EOF
+  fi
+  if [ -n "$identity" ]; then
+    echo
+    echo "The address on the commit is not a GitHub no-reply address:"
+    printf '%s' "$identity"
+    cat <<'EOF'
+
+  Every commit shows it, to anybody who can read the repository, for good.
+  Use your GitHub no-reply address for this repository instead:
+
+    git config user.email "<id>+<login>@users.noreply.github.com"
+
+  `gh api user --jq '"\(.id)+\(.login)@users.noreply.github.com"'` prints
+  yours. Without gh: GitHub, Settings, Emails.
+EOF
+  fi
+  if [ -n "$files" ]; then
+    echo
+    echo "A file you are committing contains an email address:"
+    printf '%s' "$files"
+    cat <<'EOF'
+
+  Take the address out, stage the file again (git add <file>), and commit.
+  If it is an example, use one at example.com.
+EOF
+  fi
+  if [ -n "$secrets" ]; then
+    [ -n "$identity$names$no_local_name$files" ] && echo
+    echo "Commit stopped: a file you are committing looks as if it holds a key."
+    printf '%s\n' "$secrets"
+  fi
+  if [ -n "$secrets_fallback" ]; then
+    [ -n "$identity$names$no_local_name$files" ] && echo
+    echo "Commit stopped: a file you are committing looks as if it holds a key."
+    printf '%s' "$secrets_fallback"
+    cat <<'EOF'
+
+  Keys never go in a file here: anything committed can be read by everyone
+  who can see the repository, and stays in the history after it is deleted.
+  Declare the key under app_secrets in manifest.yaml, read it with
+  os.environ["NAME"], keep the value in .env on your computer (git never
+  commits it) and set it in Pippa: Apps > Created by me > your app > Keys.
+  If a real key was ever pushed, rotate it with the provider first.
+
+  (Python was not found, so only the providers' key formats were checked.
+  With Python, scripts/check_secrets.py checks more.)
+EOF
+  fi
+} >&2
+exit 1

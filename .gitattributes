@@ -1,0 +1,4 @@
+# The hooks are shell scripts, and sh reads a carriage return at the end of a
+# line as part of the command. So they keep LF line endings in every checkout,
+# Windows with core.autocrlf=true included.
+.githooks/* text eol=lf
