@@ -39,7 +39,7 @@ persistence: none
 # It does not decide who owns the app, and nothing in this file does. Pippa
 # Labs created this repository for your Pippa account, so every app published
 # from it is yours. docs/REVIEW_AND_SHARING.md is the whole story.
-app_author_name: ""
+app_author_name: "Builder Test"
 
 app:
   # Filled in for you. A new repository replaces this placeholder within a
@@ -55,7 +55,7 @@ app:
   # Hyphens are not valid in an app id anywhere. `git remote get-url origin`
   # tells you the repository name.
   id: hack.e2e_sec_193c
-  name: Days Until
+  name: Key Check
   # The version you are pushing. Pippa keeps a copy of the code of every
   # version, so pushing a new version never changes an older one: the approved
   # version keeps working for everyone while you try the next.
@@ -171,3 +171,8 @@ outcomes:
 # Your app CAN call the public internet (see docs/HOW_PIPPA_APPS_WORK.md).
 # This repository is public, so a key in any file here is a key anyone can
 # copy: keys only ever go in Pippa and in .env.
+
+app_secrets:
+  - name: HTTPBIN_TOKEN
+    description: "Test token sent to httpbin.org/bearer by the security end-to-end test"
+    required: true
